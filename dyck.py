@@ -47,18 +47,18 @@ def first_match_policy(dyck: Sequence[int]) -> Tuple[Sequence[int], Sequence[int
 
 
 def test(B: int, N: int, d: int, E: int = 50):
-    dn = DyckNet(d)
-    loss_fn = nn.KLDivLoss(reduction='sum')
+    dn = DyckNet(d).cuda()
+    loss_fn = nn.KLDivLoss()
     opt = torch.optim.Adam(dn.parameters())
 
     for e in range(E):
         dycks = [rand_dyck(N) for _ in range(B)]
         alphas, betas, policies = list(zip(*list(map(closest_match_policy, dycks))))
         permutors = list(map(permutor, policies))
-        P = torch.stack(permutors)
-        alphas = torch.stack(list(map(torch.tensor, alphas)))
-        betas = torch.stack(list(map(torch.tensor, betas)))
-        dycks = torch.stack(list(map(torch.tensor, dycks)))
+        P = torch.stack(permutors).cuda()
+        alphas = torch.stack(list(map(torch.tensor, alphas))).cuda()
+        betas = torch.stack(list(map(torch.tensor, betas))).cuda()
+        dycks = torch.stack(list(map(torch.tensor, dycks))).cuda()
 
         matches = dn(dycks, alphas, betas)
         loss = loss_fn(matches.log(), P.transpose(2, 1))
@@ -80,7 +80,7 @@ class DyckNet(nn.Module):
         super(DyckNet, self).__init__()
         self.d = d
         self.embedder = nn.Embedding(2, 30)
-        self.encoder = nn.LSTM(input_size=30, hidden_size=d, bidirectional=True, num_layers=2)
+        self.encoder = nn.LSTM(input_size=30, hidden_size=d, bidirectional=True, num_layers=2, batch_first=True)
         self.fst = nn.Sequential(
             nn.Linear(2*d, d),
             nn.ReLU(),
@@ -94,21 +94,10 @@ class DyckNet(nn.Module):
             nn.ReLU()
         )
         self.bi = nn.Linear(d//2, d//2, bias=False)
-        self.bias = nn.Linear(d//2, 1, bias=False)
 
     def forward(self, sequence: torch.LongTensor, positives: torch.LongTensor, negatives: torch.LongTensor):
         embedded = self.embedder(sequence)
         encoded, _ = self.encoder(embedded)
-
-        b, n, d = encoded.shape
-
-        # positive_encs = torch.zeros(b, int(n/2), d)
-        # negative_encs = torch.zeros(b, int(n/2), d)
-
-        # for i in range(b):
-        #     for j in range(int(n/2)):
-        #         positive_encs[i, j, :] = encoded[i, positives[i, j], :]
-        #         negative_encs[i, j, :] = encoded[i, negatives[i, j], :]
 
 
         positives = positives.unsqueeze(-1).repeat(1, 1, encoded.shape[-1])
@@ -116,13 +105,13 @@ class DyckNet(nn.Module):
 
         positive_encs = encoded.gather(dim=1, index=positives)
         negative_encs = encoded.gather(dim=1, index=negatives)
+
         positive_encs = self.fst(positive_encs)
         negative_encs = self.snd(negative_encs)
 
-        match = torch.bmm(self.bi(positive_encs), negative_encs.transpose(2, 1)) + self.bias(negative_encs)
-        # return (match.softmax(dim=-1) + match.softmax(dim=-2))/2
-        return sinkhorn(match, 0.1, 20, 1e-06)
-#
+        match = torch.bmm(positive_encs, negative_encs.transpose(2, 1))
+        return sinkhorn(match, 0.01, 50, 1e-08)
+        # return averaged_gumbel_sinkhorn(match, 0.001, 50, 1e-10, 20)
 
 
 
