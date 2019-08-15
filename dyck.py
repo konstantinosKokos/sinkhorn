@@ -40,6 +40,12 @@ def closest_match_policy(dyck: Sequence[int]) -> Tuple[Sequence[int], Sequence[i
     return alphas, betas, pairs
 
 
+def first_match_policy(dyck: Sequence[int]) -> Tuple[Sequence[int], Sequence[int], Sequence[Tuple[int, int]]]:
+    alphas, betas = split(dyck)
+    pairs = [(i, i) for i, _ in enumerate(alphas)]
+    return alphas, betas, pairs
+
+
 def test(B: int, N: int, d: int, E: int = 50):
     dn = DyckNet(d)
     loss_fn = nn.KLDivLoss(reduction='sum')
@@ -78,15 +84,17 @@ class DyckNet(nn.Module):
         self.fst = nn.Sequential(
             nn.Linear(2*d, d),
             nn.ReLU(),
-            nn.Linear(d, d)
+            nn.Linear(d, d//2),
+            nn.ReLU()
         )
         self.snd = nn.Sequential(
             nn.Linear(2 * d, d),
             nn.ReLU(),
-            nn.Linear(d, d)
+            nn.Linear(d, d//2),
+            nn.ReLU()
         )
-        self.bi = nn.Linear(d, d, bias=False)
-        self.bias = nn.Linear(d, 1, bias=False)
+        self.bi = nn.Linear(d//2, d//2, bias=False)
+        self.bias = nn.Linear(d//2, 1, bias=False)
 
     def forward(self, sequence: torch.LongTensor, positives: torch.LongTensor, negatives: torch.LongTensor):
         embedded = self.embedder(sequence)
@@ -112,7 +120,7 @@ class DyckNet(nn.Module):
         negative_encs = self.snd(negative_encs)
 
         match = torch.bmm(self.bi(positive_encs), negative_encs.transpose(2, 1)) + self.bias(negative_encs)
-        # return match.softmax(dim=-1)
+        # return (match.softmax(dim=-1) + match.softmax(dim=-2))/2
         return sinkhorn(match, 0.1, 20, 1e-06)
 #
 
