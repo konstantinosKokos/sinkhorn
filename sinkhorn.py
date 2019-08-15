@@ -1,8 +1,10 @@
 import torch
 from torch import nn
+from torch.distributions.gumbel import Gumbel
+from torch import Tensor
 
 
-def logsumexp(inputs: torch.Tensor, dim: int = 0, keepdim: bool = False) -> torch.Tensor:
+def logsumexp(inputs: Tensor, dim: int = 0, keepdim: bool = False) -> Tensor:
     if dim == 0:
         inputs = inputs.view(-1)
     s, _ = torch.max(inputs, dim=dim, keepdim=True)
@@ -12,27 +14,27 @@ def logsumexp(inputs: torch.Tensor, dim: int = 0, keepdim: bool = False) -> torc
     return outputs
 
 
-def norm(x: torch.Tensor, dim: int) -> torch.Tensor:
+def norm(x: Tensor, dim: int) -> Tensor:
     return x - logsumexp(x, dim=dim, keepdim=True)
 
 
-def sinkhorn_step(x: torch.Tensor) -> torch.Tensor:
+def sinkhorn_step(x: Tensor) -> Tensor:
     return norm(norm(x, dim=1), dim=2)
 
 
-def sinkhorn(x: torch.Tensor, tau: float, iters: int, noise: float) -> torch.Tensor:
+def sinkhorn(x: Tensor, tau: float, iters: int, eps: float = 1e-20) -> Tensor:
     x = x / tau
     for t in range(iters):
         x = sinkhorn_step(x)
-    return torch.exp(x) + noise
+    return torch.exp(x) + eps
 
 
-class Sinkhorn(nn.Module):
-    def __init__(self, sinkhorn_iters=5, tau=0.01):
-        super(Sinkhorn, self).__init__()
-        self.tau = tau
-        self.sinkhorn_iters = sinkhorn_iters
+def gumbel_sinkhorn(x: Tensor, tau: float, iters: int, noise: float, eps: float = 1e-20) -> Tensor:
+    gumbel = Gumbel(0, 1).sample(x.shape)
+    return sinkhorn(x + gumbel * noise, tau, iters, eps)
 
-    def forward(self, x, eps=1e-6):
-        return sinkhorn(x, self.tau, self.sinkhorn_iters, eps)
 
+def averaged_gumbel_sinkhorn(x: Tensor, tau: float, iters: int, noise: float, reps: int, eps: float = 1e-20) -> Tensor:
+    x = x.repeat(reps, 1, 1, 1)
+    x = gumbel_sinkhorn(x, tau, iters, noise, eps)
+    return x.sum(dim=0) / reps
