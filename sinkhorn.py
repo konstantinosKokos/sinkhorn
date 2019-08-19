@@ -30,7 +30,7 @@ def sinkhorn(x: Tensor, tau: float, iters: int, eps: float = 1e-20) -> Tensor:
 
 
 def gumbel_sinkhorn(x: Tensor, tau: float, iters: int, noise: float, eps: float = 1e-20) -> Tensor:
-    gumbel = Gumbel(0, 1).sample(x.shape)
+    gumbel = Gumbel(0, 1).sample(x.shape).to(x.device)
     return sinkhorn(x + gumbel * noise, tau, iters, eps)
 
 
